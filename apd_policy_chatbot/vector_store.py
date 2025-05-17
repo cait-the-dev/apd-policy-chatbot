@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from typing import List, Dict, Sequence
-import os, tempfile
+import os
+import tempfile
 
 import chromadb
 from tqdm import tqdm

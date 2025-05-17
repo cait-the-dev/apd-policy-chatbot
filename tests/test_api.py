@@ -1,34 +1,31 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import types
+
 import pytest
 from fastapi.testclient import TestClient
 
 import apd_policy_chatbot.api as api_module
 import apd_policy_chatbot.vector_store as vs
 import apd_policy_chatbot.pdf_utils as pu
+import apd_policy_chatbot.llm as llm
 
 class _DummyCollection:
-    """Acts like a Chroma collection – stores docs in memory."""
     def __init__(self):
         self.docs = {}
-
     def add(self, embeddings, documents, metadatas, ids):
         for _id, doc, meta in zip(ids, documents, metadatas):
             self.docs[_id] = {"doc": doc, "meta": meta}
-
-    def query(self, query_embeddings, n_results): 
+    def query(self, query_embeddings, n_results):
         ids = list(self.docs)[:n_results]
         return {
-            "documents": [[self.docs[_id]["doc"] for _id in ids]],
-            "metadatas": [[self.docs[_id]["meta"] for _id in ids]],
+            "documents": [[self.docs[i]["doc"] for i in ids]],
+            "metadatas": [[self.docs[i]["meta"] for i in ids]],
         }
 
 class _DummyClient:
-    def __init__(self, *_, **__):
-        self.collections = {}
+    def __init__(self, *_, **__): self.collections = {}
     def get_or_create_collection(self, name):
         self.collections.setdefault(name, _DummyCollection())
         return self.collections[name]
@@ -39,37 +36,40 @@ def stub_chroma(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def stub_embed(monkeypatch):
-    monkeypatch.setattr(vs, "embed", lambda texts, *_, **__: [[1.0, 1.0, 1.0] for _ in texts])
+    monkeypatch.setattr(vs, "embed", lambda txts, *_, **__: [[0.1, 0.2, 0.3] for _ in txts])
 
 @pytest.fixture(autouse=True)
-def stub_extract_text(monkeypatch):
-    monkeypatch.setattr(pu, "extract_text", lambda path: [("stub text for pdf", 1)])
+def stub_extract(monkeypatch):
+    monkeypatch.setattr(pu, "extract_text", lambda _: [("stub text", 1)])
+
+@pytest.fixture(autouse=True)
+def stub_answer(monkeypatch):
+    monkeypatch.setattr(
+        llm,
+        "answer_question",
+        lambda *_args, **_kw: {"answer": "stub answer", "pages": [1]},
+    )
 
 @pytest.fixture(scope="module")
 def client():
     with TestClient(api_module.app) as c:
         yield c
 
-def test_healthz(client: TestClient):
+def test_healthz_initial_false(client: TestClient):
     resp = client.get("/healthz")
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True}
+    assert resp.json() == {"ok": False}
 
+def test_ingest_then_healthz_true_and_ask(tmp_path: Path, client: TestClient):
+    pdf = tmp_path / "dummy.pdf"
+    pdf.write_text("irrelevant")
 
-def test_ingest_and_ask_roundtrip(tmp_path: Path, client: TestClient):
-    # fake PDF file path
-    pdf_path = tmp_path / "dummy.pdf"
-    pdf_path.write_text("irrelevant")
+    ing = client.post("/ingest", params={"pdf_path": str(pdf)})
+    assert ing.status_code == 200 and ing.json()["status"] == "ok"
 
-    # ingest
-    resp_ingest = client.post("/ingest", params={"pdf_path": str(pdf_path)})
-    assert resp_ingest.status_code == 200
-    assert resp_ingest.json()["status"] == "ok"
+    assert client.get("/healthz").json() == {"ok": True}
 
-    # ask
-    q_payload = {"question": "What is in this doc?"}
-    resp_ask = client.post("/ask", json=q_payload)
-    assert resp_ask.status_code == 200
-    body = resp_ask.json()
-    assert body["pages"] == [1]
-    assert "answer" in body and body["answer"]
+    ask = client.post("/ask", json={"question": "whatever"})
+    assert ask.status_code == 200
+    body = ask.json()
+    assert body["pages"] == [1] and "answer" in body

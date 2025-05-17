@@ -25,7 +25,7 @@
 
 | Tool | Win / macOS / Linux |
 |------|---------------------|
-| Python ≥ 3.9 | ✅ |
+| Python ≥ 3.10 | ✅ |
 | Tesseract ≥ 5.0 (for OCR on images) | `choco install tesseract` / `brew install tesseract` |
 | NVIDIA GPU (optional) | for local BGE embeddings |
 | **OpenAI API key** | `export OPENAI_API_KEY=sk-…` |
