@@ -1,4 +1,4 @@
-from importlib.metadata import version as _v
+from importlib.metadata import version as _v, PackageNotFoundError
 
 __all__ = [
     "__version__",
@@ -6,7 +6,10 @@ __all__ = [
     "chat",
 ]
 
-__version__: str = _v(__name__.replace("_", "-"))
+try:  
+    __version__: str = _v(__name__.replace("_", "-"))
+except PackageNotFoundError:  
+    __version__ = "0.0.0"
 
 from pathlib import Path
 from typing import List, Dict 

@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Optional, List
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+import logging
 
 import openai
 from chromadb import PersistentClient
+from chromadb.api.types import Collection
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -18,57 +20,67 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
 else:
-    print("[WARN] OPENAI_API_KEY not set — /ask will return 503 until provided.")
+    logging.warning("OPENAI_API_KEY not set — /ask will return 503 until provided.")
 
-STARTUP_DOC = os.getenv("CHATBOT_PDF_PATH") 
+STARTUP_DOC = os.getenv("CHATBOT_PDF_PATH")  
 CHROMA_PATH = ".chroma"
-COLL_NAME   = "ingested"
+COLL_NAME = "doc_chunks" 
 
-def _load_persisted_collection() -> Optional[vector_store.chromadb.Collection]:
+def _load_persisted_collection() -> Optional[Collection]:
     client = PersistentClient(path=CHROMA_PATH)
     try:
-        col = client.get_collection(COLL_NAME)
-    except ValueError:
+        return client.get_collection(
+            COLL_NAME,
+            embedding_function=lambda x: vector_store.embed(x),
+        )
+    except Exception as err:
+        logging.warning("No compatible collection on disk: %s", err)
         return None
-    return col if col.count() > 0 else None
 
-def _build_collection(path: Path):
+
+def _build_collection(path: Path) -> Collection:
     pages = pdf_utils.extract_text(path)
     chunks = [c for txt, p in pages for c in chunking.chunk_page(txt, p)]
-    return vector_store.build_vector_store(chunks, name="doc")
+    return vector_store.build_vector_store(chunks, name=COLL_NAME)
 
-collection = None  # global cache for demo
 
-# Pre-loads the document on server startup.
-# @asynccontextmanager
-# async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-#     global collection
-#     if STARTUP_DOC and Path(STARTUP_DOC).expanduser().exists():
-#         try:
-#             print(f"[INFO] Pre-loading {STARTUP_DOC} …")
-#             collection = _build_collection(Path(STARTUP_DOC).expanduser())
-#             print("[INFO] Pre-load finished.")
-#         except Exception as exc:
-#             print(f"[WARN] Startup preload failed: {exc}")
-#     else:
-#         print("[INFO] No startup document — waiting for /ingest")
-#     yield  
+collection: Optional[Collection] = None 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    print("[INFO] Startup: not preloading any document. Use /ingest.")
+    global collection
+
+    if STARTUP_DOC and Path(STARTUP_DOC).expanduser().exists():
+        try:
+            logging.info("Pre-loading %s …", STARTUP_DOC)
+            collection = _build_collection(Path(STARTUP_DOC).expanduser())
+            logging.info("Pre-load finished.")
+        except Exception as exc:
+            logging.warning("Startup preload failed: %s", exc)
+
+    if collection is None:
+        collection = _load_persisted_collection()
+
+    if collection:
+        logging.info("Vector store ready with %s chunks", collection.count())
+    else:
+        logging.info("No collection yet — waiting for /ingest")
+
     yield
 
-app = FastAPI(title="APD Policy Chatbot", version="0.3.0", lifespan=lifespan)
+
+app = FastAPI(title="APD Policy Chatbot", version="0.4.0", lifespan=lifespan)
 
 class ChatRequest(BaseModel):
     question: str
     k: int = 5
     pdf_path: Optional[str] = None
 
+
 class ChatResponse(BaseModel):
     answer: str
     pages: List[int]
+
 
 @app.post("/ask", response_model=ChatResponse)
 async def ask(req: ChatRequest):
@@ -79,13 +91,13 @@ async def ask(req: ChatRequest):
 
     if req.pdf_path:
         try:
-            pages  = pdf_utils.extract_text(Path(req.pdf_path).expanduser())
+            pages = pdf_utils.extract_text(Path(req.pdf_path).expanduser())
             chunks = [c for txt, p in pages for c in chunking.chunk_page(txt, p)]
-            local  = vector_store.build_vector_store(chunks, name="tmp")
+            local = vector_store.build_vector_store(chunks, name="tmp")
         except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
     else:
-        if collection is None:
+        if collection is None:  
             collection = _load_persisted_collection()
         if collection is None:
             raise HTTPException(503, "No document ingested; call /ingest")
@@ -94,16 +106,16 @@ async def ask(req: ChatRequest):
     result = llm.answer_question(local, req.question, k=req.k, stream=False)
     return JSONResponse(content=result)
 
+
 @app.post("/ingest")
 async def ingest(pdf_path: str = Query(..., description="Path to a PDF to ingest")):
     global collection
     try:
-        pages = pdf_utils.extract_text(Path(pdf_path).expanduser())
-        chunks = [c for txt, p in pages for c in chunking.chunk_page(txt, p)]
-        collection = vector_store.build_vector_store(chunks, name=COLL_NAME)
+        collection = _build_collection(Path(pdf_path).expanduser())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"status": "ok", "pages": len(chunks)}
+    return {"status": "ok", "pages": collection.count()}
+
 
 @app.get("/healthz")
 async def healthz():

@@ -1,25 +1,22 @@
-FROM python:3.11-slim AS base
+FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    POETRY_VERSION=1.8.2
+    PYTHONUNBUFFERED=1
 
-RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends build-essential curl && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN curl -sSL https://install.python-poetry.org | python3 - && \
-    ln -s "$HOME/.local/bin/poetry" /usr/local/bin/poetry
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        tesseract-ocr poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml poetry.lock* README.md ./
 
-RUN poetry config virtualenvs.create false && \
-    poetry install --only main --no-interaction --no-ansi
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir "uvicorn[standard]"
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY apd_policy_chatbot ./apd_policy_chatbot
+COPY README.md .
 
 ENV PORT=8000
 EXPOSE 8000
-
 CMD ["uvicorn", "apd_policy_chatbot.api:app", "--host", "0.0.0.0", "--port", "8000"]
