@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI (uvicorn)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "apd_policy_chatbot.api:app",
+        "--host", "127.0.0.1",
+        "--port", "8000",
+        "--reload",              
+        "--reload-dir", "${workspaceFolder}/apd_policy_chatbot"
+      ],
+      "jinja": true,            
+      "envFile": "${workspaceFolder}/.env",    
+      "console": "integratedTerminal",
+      "justMyCode": false    
+    },
+    {
+      "name": "Chatbot CLI  (with --debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "apd_policy_chatbot.cli",
+      "args": [
+        "imgs/APD_policy_page.jpg",
+        "--debug"
+      ],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false
+    }
+  ]
+}
