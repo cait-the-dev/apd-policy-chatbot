@@ -19,23 +19,17 @@
       "justMyCode": false    
     },
     {
-      "name": "Pytest (single file)",
+      "name": "Chatbot CLI  (with --debug)",
       "type": "debugpy",
       "request": "launch",
-      "module": "pytest",
-      "args": ["-vv", "${file}"],
-      "console": "integratedTerminal"
-    },
-    {
-      "name": "Pytest (focused test)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "pytest",
+      "module": "apd_policy_chatbot.cli",
       "args": [
-        "-vv",
-        "tests/test_api.py::test_ingest_then_healthz_true_and_ask"
+        "imgs/APD_policy_page.jpg",
+        "--debug"
       ],
-      "console": "integratedTerminal"
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false
     }
   ]
 }
